@@ -1,5 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&display=swap');
 @import url('https://fonts.geist-ui.dev/font.css');
+@import url("https://fonts.googleapis.com/css2?family=Montserrat&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -7,7 +8,7 @@
 
 @layer base {
   :root {
-    --background: 0 0% 4%;
+    --background: 201 48% 6%;
     --foreground: 0 0% 100%;
     --card: 0 0% 4%;
     --card-foreground: 0 0% 100%;
@@ -19,7 +20,7 @@
     --secondary-foreground: 0 0% 100%;
     --muted: 0 0% 9%;
     --muted-foreground: 0 0% 64%;
-    --accent: 0 0% 9%;
+    --accent: 0 73% 53%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
@@ -27,6 +28,10 @@
     --input: 0 0% 12%;
     --ring: 142 84% 58%;
     --radius: 0.75rem;
+    --font-sans: Montserrat, ui-sans-serif, system-ui, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji;
+  }
+  .dark {
+    --font-sans: Montserrat, ui-sans-serif, system-ui, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji;
   }
 }
 
