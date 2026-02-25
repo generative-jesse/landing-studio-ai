@@ -12,13 +12,16 @@ import {
 } from "recharts";
 import { COINS, CoinId, Timeframe, calculatePriceTargets, formatPrice } from "@/lib/crypto-api";
 import { usePriceHistory } from "@/hooks/useCryptoData";
+import { PolymarketPrediction } from "@/hooks/usePolymarketPredictions";
 import { cn } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 interface PriceChartProps {
   coinId: CoinId;
   timeframe: Timeframe;
   onTimeframeChange: (tf: Timeframe) => void;
+  predictions?: PolymarketPrediction[];
 }
 
 const TIMEFRAMES: { value: Timeframe; label: string }[] = [
@@ -37,7 +40,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   );
 };
 
-const PriceChart = ({ coinId, timeframe, onTimeframeChange }: PriceChartProps) => {
+const PriceChart = ({ coinId, timeframe, onTimeframeChange, predictions }: PriceChartProps) => {
   const { data, isLoading, isError } = usePriceHistory(coinId, timeframe);
   const coin = COINS[coinId];
 
@@ -49,11 +52,25 @@ const PriceChart = ({ coinId, timeframe, onTimeframeChange }: PriceChartProps) =
   const yDomain = useMemo(() => {
     if (!data?.length) return ['auto', 'auto'] as [string, string];
     const prices = data.map(d => d.price);
-    const min = Math.min(...prices);
-    const max = Math.max(...prices);
+    // Include polymarket targets in domain calculation
+    const polyPrices = (coinId === 'bitcoin' && predictions)
+      ? predictions.map(p => p.targetPrice)
+      : [];
+    const allPrices = [...prices, ...polyPrices];
+    const min = Math.min(...allPrices);
+    const max = Math.max(...allPrices);
     const padding = (max - min) * 0.05;
     return [min - padding, max + padding];
-  }, [data]);
+  }, [data, predictions, coinId]);
+
+  // Filter predictions that are within chart range
+  const visiblePredictions = useMemo(() => {
+    if (coinId !== 'bitcoin' || !predictions?.length || !data?.length) return [];
+    const prices = data.map(d => d.price);
+    const min = Math.min(...prices) * 0.9;
+    const max = Math.max(...prices) * 1.1;
+    return predictions.filter(p => p.targetPrice >= min && p.targetPrice <= max);
+  }, [predictions, data, coinId]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -109,11 +126,7 @@ const PriceChart = ({ coinId, timeframe, onTimeframeChange }: PriceChartProps) =
                     <stop offset="100%" stopColor={coin.color} stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="hsl(0 0% 12%)"
-                  vertical={false}
-                />
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 12%)" vertical={false} />
                 <XAxis
                   dataKey="time"
                   tick={{ fill: 'hsl(0 0% 45%)', fontSize: 10 }}
@@ -140,39 +153,41 @@ const PriceChart = ({ coinId, timeframe, onTimeframeChange }: PriceChartProps) =
                       stroke="hsl(0 84% 60%)"
                       strokeDasharray="6 4"
                       strokeOpacity={0.6}
-                      label={{
-                        value: `R ${formatPrice(targets.resistance)}`,
-                        position: 'right',
-                        fill: 'hsl(0 84% 60%)',
-                        fontSize: 10,
-                      }}
+                      label={{ value: `R ${formatPrice(targets.resistance)}`, position: 'right', fill: 'hsl(0 84% 60%)', fontSize: 10 }}
                     />
                     <ReferenceLine
                       y={targets.mid}
                       stroke="hsl(0 0% 45%)"
                       strokeDasharray="4 4"
                       strokeOpacity={0.4}
-                      label={{
-                        value: `Mid ${formatPrice(targets.mid)}`,
-                        position: 'right',
-                        fill: 'hsl(0 0% 45%)',
-                        fontSize: 10,
-                      }}
+                      label={{ value: `Mid ${formatPrice(targets.mid)}`, position: 'right', fill: 'hsl(0 0% 45%)', fontSize: 10 }}
                     />
                     <ReferenceLine
                       y={targets.support}
                       stroke="hsl(142 84% 58%)"
                       strokeDasharray="6 4"
                       strokeOpacity={0.6}
-                      label={{
-                        value: `S ${formatPrice(targets.support)}`,
-                        position: 'right',
-                        fill: 'hsl(142 84% 58%)',
-                        fontSize: 10,
-                      }}
+                      label={{ value: `S ${formatPrice(targets.support)}`, position: 'right', fill: 'hsl(142 84% 58%)', fontSize: 10 }}
                     />
                   </>
                 )}
+
+                {/* Polymarket prediction overlays */}
+                {visiblePredictions.map((p) => (
+                  <ReferenceLine
+                    key={p.conditionId}
+                    y={p.targetPrice}
+                    stroke="hsl(270 80% 65%)"
+                    strokeDasharray="8 4"
+                    strokeOpacity={0.7}
+                    label={{
+                      value: `⬥ ${formatPrice(p.targetPrice)} · ${p.yesProb}%`,
+                      position: 'insideTopRight',
+                      fill: 'hsl(270 80% 65%)',
+                      fontSize: 10,
+                    }}
+                  />
+                ))}
 
                 <Area
                   type="monotone"
@@ -190,19 +205,28 @@ const PriceChart = ({ coinId, timeframe, onTimeframeChange }: PriceChartProps) =
         )}
       </div>
 
-      {/* Price targets legend */}
-      {targets && (
-        <div className="flex items-center gap-6 text-xs">
+      {/* Legend */}
+      <div className="flex flex-wrap items-center gap-4 text-xs">
+        {targets && (
+          <>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-[2px]" style={{ backgroundImage: 'repeating-linear-gradient(90deg, hsl(142 84% 58%) 0, hsl(142 84% 58%) 6px, transparent 6px, transparent 10px)' }} />
+              <span className="text-muted-foreground">Support: <span className="text-primary font-medium">{formatPrice(targets.support)}</span></span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-[2px]" style={{ backgroundImage: 'repeating-linear-gradient(90deg, hsl(0 84% 60%) 0, hsl(0 84% 60%) 6px, transparent 6px, transparent 10px)' }} />
+              <span className="text-muted-foreground">Resistance: <span className="text-destructive font-medium">{formatPrice(targets.resistance)}</span></span>
+            </div>
+          </>
+        )}
+        {visiblePredictions.length > 0 && (
           <div className="flex items-center gap-2">
-            <div className="w-4 h-[2px] bg-primary" style={{ backgroundImage: 'repeating-linear-gradient(90deg, hsl(142 84% 58%) 0, hsl(142 84% 58%) 6px, transparent 6px, transparent 10px)' }} />
-            <span className="text-muted-foreground">Support: <span className="text-primary font-medium">{formatPrice(targets.support)}</span></span>
+            <div className="w-4 h-[2px]" style={{ backgroundImage: 'repeating-linear-gradient(90deg, hsl(270 80% 65%) 0, hsl(270 80% 65%) 8px, transparent 8px, transparent 12px)' }} />
+            <span className="text-muted-foreground">Polymarket Target</span>
+            <Badge variant="outline" className="text-[9px] px-1 py-0 border-[hsl(270,80%,65%)]/40 text-[hsl(270,80%,65%)]">PREDICTION</Badge>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-[2px]" style={{ backgroundImage: 'repeating-linear-gradient(90deg, hsl(0 84% 60%) 0, hsl(0 84% 60%) 6px, transparent 6px, transparent 10px)' }} />
-            <span className="text-muted-foreground">Resistance: <span className="text-destructive font-medium">{formatPrice(targets.resistance)}</span></span>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };

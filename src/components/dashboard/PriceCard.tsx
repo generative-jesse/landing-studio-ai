@@ -1,19 +1,32 @@
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { COINS, CoinId, CoinPrice, formatPrice } from "@/lib/crypto-api";
 import { TrendingUp, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { RealtimeTick } from "@/hooks/useRealtimePrice";
 
 interface PriceCardProps {
   coinId: CoinId;
   data?: CoinPrice;
   isSelected: boolean;
   onSelect: (id: CoinId) => void;
+  realtimeTick?: RealtimeTick | null;
 }
 
-const PriceCard = ({ coinId, data, isSelected, onSelect }: PriceCardProps) => {
+const PriceCard = ({ coinId, data, isSelected, onSelect, realtimeTick }: PriceCardProps) => {
   const coin = COINS[coinId];
   const change = data?.usd_24h_change ?? 0;
   const isPositive = change >= 0;
+  const [flash, setFlash] = useState<'up' | 'down' | null>(null);
+
+  const displayPrice = (coinId === 'bitcoin' && realtimeTick?.price) ? realtimeTick.price : data?.usd;
+
+  useEffect(() => {
+    if (coinId !== 'bitcoin' || !realtimeTick || realtimeTick.direction === 'neutral') return;
+    setFlash(realtimeTick.direction);
+    const timer = setTimeout(() => setFlash(null), 600);
+    return () => clearTimeout(timer);
+  }, [realtimeTick, coinId]);
 
   return (
     <motion.button
@@ -45,8 +58,14 @@ const PriceCard = ({ coinId, data, isSelected, onSelect }: PriceCardProps) => {
           </div>
         )}
       </div>
-      <span className="text-lg font-semibold tracking-tight text-foreground">
-        {data ? formatPrice(data.usd) : '—'}
+      <span
+        className={cn(
+          "text-lg font-semibold tracking-tight text-foreground transition-colors duration-300",
+          flash === 'up' && "text-primary",
+          flash === 'down' && "text-destructive"
+        )}
+      >
+        {displayPrice ? formatPrice(displayPrice) : '—'}
       </span>
       <span className="text-[10px] text-muted-foreground">{coin.name}</span>
     </motion.button>
