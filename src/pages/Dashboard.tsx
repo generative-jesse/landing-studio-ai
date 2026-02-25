@@ -3,15 +3,20 @@ import { motion } from "framer-motion";
 import { Activity, Zap } from "lucide-react";
 import { CoinId, COIN_IDS, Timeframe } from "@/lib/crypto-api";
 import { useCryptoPrices } from "@/hooks/useCryptoData";
+import { useRealtimePrice } from "@/hooks/useRealtimePrice";
+import { usePolymarketPredictions } from "@/hooks/usePolymarketPredictions";
 import PriceCard from "@/components/dashboard/PriceCard";
 import PriceChart from "@/components/dashboard/PriceChart";
 import MarketStats from "@/components/dashboard/MarketStats";
+import SentimentTable from "@/components/dashboard/SentimentTable";
 import ApiKeySettings from "@/components/dashboard/ApiKeySettings";
 
 const Dashboard = () => {
   const [selectedCoin, setSelectedCoin] = useState<CoinId>('bitcoin');
   const [timeframe, setTimeframe] = useState<Timeframe>('5m');
   const { data: prices, isLoading, dataUpdatedAt } = useCryptoPrices();
+  const btcTick = useRealtimePrice('BTC-USD');
+  const { data: predictions } = usePolymarketPredictions();
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -24,6 +29,12 @@ const Dashboard = () => {
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium ml-1">LIVE</span>
           </div>
           <div className="flex items-center gap-3">
+            {btcTick && (
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                WS Connected
+              </div>
+            )}
             {dataUpdatedAt > 0 && (
               <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                 <Activity className="w-3 h-3 text-primary animate-pulse" />
@@ -50,6 +61,7 @@ const Dashboard = () => {
               data={prices?.[coinId]}
               isSelected={selectedCoin === coinId}
               onSelect={setSelectedCoin}
+              realtimeTick={coinId === 'bitcoin' ? btcTick : undefined}
             />
           ))}
         </motion.div>
@@ -67,6 +79,7 @@ const Dashboard = () => {
               coinId={selectedCoin}
               timeframe={timeframe}
               onTimeframeChange={setTimeframe}
+              predictions={selectedCoin === 'bitcoin' ? predictions : undefined}
             />
           </motion.div>
 
@@ -78,7 +91,7 @@ const Dashboard = () => {
             className="flex flex-col gap-6"
           >
             <MarketStats coinId={selectedCoin} data={prices?.[selectedCoin]} />
-            
+
             {/* Quick Insights */}
             <div className="flex flex-col gap-3">
               <h3 className="text-sm font-semibold text-foreground">Quick Insights</h3>
@@ -111,6 +124,17 @@ const Dashboard = () => {
             </div>
           </motion.div>
         </div>
+
+        {/* Sentiment Table — full width below chart */}
+        {selectedCoin === 'bitcoin' && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.3 }}
+          >
+            <SentimentTable />
+          </motion.div>
+        )}
       </main>
     </div>
   );
