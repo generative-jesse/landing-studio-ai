@@ -1,10 +1,9 @@
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePolymarketAll, UpDownMarket, PolymarketTimeframe } from '@/hooks/usePolymarketPredictions';
-import { useCryptoPrices } from '@/hooks/useCryptoData';
-import { COINS, CoinId, formatPrice } from '@/lib/crypto-api';
+import { COINS, CoinId } from '@/lib/crypto-api';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight, Zap, ExternalLink } from 'lucide-react';
+import { Loader2, TrendingUp, TrendingDown, Zap, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type ViewMode = 'by-timeframe' | 'by-coin';
@@ -13,42 +12,10 @@ const TIMEFRAME_ORDER: PolymarketTimeframe[] = ['5m', '15m', '1h'];
 const COIN_ORDER: CoinId[] = ['bitcoin', 'ethereum', 'solana', 'ripple'];
 const TF_LABELS: Record<PolymarketTimeframe, string> = { '5m': '5 Min', '15m': '15 Min', '1h': '1 Hour' };
 
-function DistanceGauge({ currentPrice, targetPrice }: { currentPrice: number; targetPrice: number }) {
-  const diff = targetPrice - currentPrice;
-  const pctDiff = (diff / currentPrice) * 100;
-  const isAbove = diff > 0;
-  const clampedPct = Math.max(-10, Math.min(10, pctDiff));
-  const fillPct = ((clampedPct + 10) / 20) * 100;
-
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-        <span>-10%</span>
-        <span className={cn("font-mono font-semibold text-[11px]", isAbove ? "text-primary" : "text-destructive")}>
-          {isAbove ? '+' : ''}{pctDiff.toFixed(2)}%
-        </span>
-        <span>+10%</span>
-      </div>
-      <div className="relative h-1.5 rounded-full bg-secondary overflow-hidden">
-        <div className="absolute left-1/2 top-0 bottom-0 w-px bg-muted-foreground/30" />
-        <motion.div
-          className={cn("absolute top-0 bottom-0 rounded-full", isAbove ? "bg-primary" : "bg-destructive")}
-          initial={{ width: 0 }}
-          animate={{
-            left: isAbove ? '50%' : `${fillPct}%`,
-            width: isAbove ? `${fillPct - 50}%` : `${50 - fillPct}%`,
-          }}
-          transition={{ duration: 0.6, ease: 'easeOut' }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function MarketCard({ market, currentPrice }: { market: UpDownMarket; currentPrice?: number }) {
+function MarketCard({ market }: { market: UpDownMarket }) {
   const coin = COINS[market.coin];
-  const diff = currentPrice ? ((market.priceToBeat - currentPrice) / currentPrice) * 100 : null;
   const polyUrl = `https://polymarket.com/event/${market.slug}`;
+  const upPct = Math.round(market.upPrice * 100);
 
   return (
     <motion.div
@@ -58,13 +25,7 @@ function MarketCard({ market, currentPrice }: { market: UpDownMarket; currentPri
       exit={{ opacity: 0, scale: 0.95 }}
       className="rounded-lg border border-border/40 bg-secondary/20 p-3 flex flex-col gap-2.5 hover:border-border/60 transition-colors"
     >
-      {/* Header */}
-      <a
-        href={polyUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex items-center justify-between group"
-      >
+      <a href={polyUrl} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between group">
         <div className="flex items-center gap-2">
           <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: coin.color }} />
           <span className="text-xs font-semibold text-foreground">{coin.symbol}</span>
@@ -75,34 +36,35 @@ function MarketCard({ market, currentPrice }: { market: UpDownMarket; currentPri
         <ExternalLink className="w-3 h-3 text-muted-foreground group-hover:text-primary transition-colors" />
       </a>
 
-      {/* Target Price */}
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-[10px] text-muted-foreground">Price to Beat</p>
-          <p className="text-sm font-mono font-bold text-foreground">{formatPrice(market.priceToBeat)}</p>
-        </div>
-        {diff !== null && (
-          <div className={cn("flex items-center gap-0.5 text-xs font-medium", diff > 0 ? "text-primary" : "text-destructive")}>
-            {diff > 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-            {Math.abs(diff).toFixed(2)}% away
-          </div>
-        )}
-      </div>
-
-      {currentPrice && market.priceToBeat > 0 && (
-        <DistanceGauge currentPrice={currentPrice} targetPrice={market.priceToBeat} />
+      {market.timeRange && (
+        <p className="text-[10px] text-muted-foreground font-mono">{market.timeRange}</p>
       )}
 
-      {/* Payout Grid */}
+      {/* Probability bar */}
+      <div className="flex flex-col gap-0.5">
+        <div className="flex items-center justify-between text-[9px]">
+          <span className="text-primary font-medium">UP {upPct}%</span>
+          <span className="text-destructive font-medium">DOWN {100 - upPct}%</span>
+        </div>
+        <div className="relative h-1.5 rounded-full bg-destructive/30 overflow-hidden">
+          <motion.div
+            className="absolute top-0 bottom-0 left-0 rounded-full bg-primary"
+            initial={{ width: 0 }}
+            animate={{ width: `${upPct}%` }}
+            transition={{ duration: 0.5 }}
+          />
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-2">
         <div className="rounded-md bg-primary/10 border border-primary/20 px-2 py-1.5 text-center">
           <p className="text-[9px] text-muted-foreground mb-0.5">Up</p>
-          <p className="text-xs font-mono font-bold text-primary">{Math.round(market.upPrice * 100)}¢</p>
+          <p className="text-xs font-mono font-bold text-primary">{upPct}¢</p>
           <p className="text-[9px] text-primary/70">→ ${market.upPayout.toFixed(2)}</p>
         </div>
         <div className="rounded-md bg-destructive/10 border border-destructive/20 px-2 py-1.5 text-center">
           <p className="text-[9px] text-muted-foreground mb-0.5">Down</p>
-          <p className="text-xs font-mono font-bold text-destructive">{Math.round(market.downPrice * 100)}¢</p>
+          <p className="text-xs font-mono font-bold text-destructive">{100 - upPct}¢</p>
           <p className="text-[9px] text-destructive/70">→ ${market.downPayout.toFixed(2)}</p>
         </div>
       </div>
@@ -115,9 +77,6 @@ const PolymarketGrid = () => {
   const [selectedTimeframe, setSelectedTimeframe] = useState<PolymarketTimeframe>('5m');
   const [selectedCoin, setSelectedCoin] = useState<CoinId>('bitcoin');
   const { data: markets, isLoading, isError } = usePolymarketAll();
-  const { data: prices } = useCryptoPrices();
-
-  const getCurrentPrice = (coin: CoinId): number | undefined => prices?.[coin]?.usd;
 
   const filteredMarkets = useMemo(() => {
     if (!markets) return [];
@@ -224,11 +183,7 @@ const PolymarketGrid = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <AnimatePresence mode="popLayout">
             {filteredMarkets.map(m => (
-              <MarketCard
-                key={`${m.coin}-${m.timeframe}`}
-                market={m}
-                currentPrice={getCurrentPrice(m.coin)}
-              />
+              <MarketCard key={`${m.coin}-${m.timeframe}`} market={m} />
             ))}
           </AnimatePresence>
           {filteredMarkets.length === 0 && (
@@ -243,7 +198,7 @@ const PolymarketGrid = () => {
         <span>Prices = cost per share · Payout = return per $1 if correct</span>
         <span className="flex items-center gap-1">
           <TrendingUp className="w-3 h-3" />
-          Gauge shows distance to target
+          Click any card to view on Polymarket
         </span>
       </div>
     </div>
