@@ -8,8 +8,7 @@ import { usePolymarketPredictions } from "@/hooks/usePolymarketPredictions";
 import PriceCard from "@/components/dashboard/PriceCard";
 import PriceChart from "@/components/dashboard/PriceChart";
 import MarketStats from "@/components/dashboard/MarketStats";
-import SentimentTable from "@/components/dashboard/SentimentTable";
-import PolymarketGrid from "@/components/dashboard/PolymarketGrid";
+import CoinMarketStrip from "@/components/dashboard/CoinMarketStrip";
 import ApiKeySettings from "@/components/dashboard/ApiKeySettings";
 
 const Dashboard = () => {
@@ -126,25 +125,14 @@ const Dashboard = () => {
           </motion.div>
         </div>
 
-        {/* Polymarket Comparison Grid — full width */}
+        {/* Coin Market Strip — per-selected-coin Polymarket Up/Down */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, delay: 0.3 }}
         >
-          <PolymarketGrid />
+          <CoinMarketStrip selectedCoin={selectedCoin} />
         </motion.div>
-
-        {/* Sentiment Table — BTC only */}
-        {selectedCoin === 'bitcoin' && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.4 }}
-          >
-            <SentimentTable />
-          </motion.div>
-        )}
       </main>
     </div>
   );
