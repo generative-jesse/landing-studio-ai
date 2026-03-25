@@ -58,21 +58,10 @@ async function proxyFetch(params: { path?: string; query?: string }): Promise<an
   return res.json();
 }
 
-function extractPriceToBeat(event: any): number | null {
-  // Try eventMetadata first
-  if (event.eventMetadata) {
-    try {
-      const meta = typeof event.eventMetadata === 'string' 
-        ? JSON.parse(event.eventMetadata) 
-        : event.eventMetadata;
-      if (meta.priceToBeat) return parseFloat(meta.priceToBeat);
-    } catch {}
-  }
-  // Try from title/description
-  const text = event.title || event.description || '';
-  const match = text.match(/\$?([\d,]+(?:\.\d+)?)/);
-  if (match) return parseFloat(match[1].replace(/,/g, ''));
-  return null;
+function extractTimeRange(title: string): string {
+  // Extract time range like "6:20AM-6:25AM ET"
+  const match = title.match(/(\d{1,2}:\d{2}[AP]M\s*-\s*\d{1,2}:\d{2}[AP]M\s*ET)/i);
+  return match ? match[1] : '';
 }
 
 function parseOutcomePrices(market: any): { upPrice: number; downPrice: number } {
