@@ -9,10 +9,11 @@ export interface UpDownMarket {
   timeframe: PolymarketTimeframe;
   slug: string;
   question: string;
-  priceToBeat: number;
-  upPrice: number;   // 0-1
-  downPrice: number;  // 0-1
-  upPayout: number;   // return per $1
+  title: string;
+  timeRange: string; // e.g. "6:20AM-6:25AM ET"
+  upPrice: number;   // 0-1 probability
+  downPrice: number;
+  upPayout: number;
   downPayout: number;
   endDate: string;
 }
@@ -59,7 +60,6 @@ async function proxyFetch(params: { path?: string; query?: string }): Promise<an
 }
 
 function extractTimeRange(title: string): string {
-  // Extract time range like "6:20AM-6:25AM ET"
   const match = title.match(/(\d{1,2}:\d{2}[AP]M\s*-\s*\d{1,2}:\d{2}[AP]M\s*ET)/i);
   return match ? match[1] : '';
 }
@@ -67,17 +67,6 @@ function extractTimeRange(title: string): string {
 function parseOutcomePrices(market: any): { upPrice: number; downPrice: number } {
   let upPrice = 0.5, downPrice = 0.5;
   
-  // Try tokens array first (common in gamma API response)
-  if (market.tokens && Array.isArray(market.tokens)) {
-    for (const token of market.tokens) {
-      const outcome = (token.outcome || '').toLowerCase();
-      if (outcome === 'up' || outcome === 'yes') upPrice = parseFloat(token.price) || 0.5;
-      if (outcome === 'down' || outcome === 'no') downPrice = parseFloat(token.price) || 0.5;
-    }
-    return { upPrice, downPrice };
-  }
-  
-  // Try outcomePrices
   if (market.outcomePrices) {
     try {
       const prices = typeof market.outcomePrices === 'string' 
@@ -95,21 +84,19 @@ function parseOutcomePrices(market: any): { upPrice: number; downPrice: number }
 
 function parseEventToMarket(event: any, coin: CoinId, timeframe: PolymarketTimeframe): UpDownMarket | null {
   const slug = event.slug || '';
-  const priceToBeat = extractPriceToBeat(event);
-  
-  // Get prices from first market in event
+  const title = event.title || '';
   const market = event.markets?.[0] || event;
   const { upPrice, downPrice } = parseOutcomePrices(market);
-  
-  if (!priceToBeat && !slug) return null;
+  const timeRange = extractTimeRange(title);
   
   return {
     coin,
     coinSymbol: ASSET_SYMBOLS[coin],
     timeframe,
     slug,
-    question: event.title || market.question || '',
-    priceToBeat: priceToBeat || 0,
+    question: market.question || title,
+    title,
+    timeRange,
     upPrice,
     downPrice,
     upPayout: upPrice > 0 ? +(1 / upPrice).toFixed(2) : 0,
@@ -136,11 +123,9 @@ async function fetchEpochMarket(coin: CoinId, tf: '5m' | '15m'): Promise<UpDownM
     try {
       const event = await proxyFetch({ path: `events/slug/${slug}` });
       if (event && !event.error && event.slug) {
-        // Check if not closed
         if (event.closed) continue;
-        const endDate = new Date(event.endDate || event.end_date_iso || 0);
+        const endDate = new Date(event.endDate || 0);
         if (endDate.getTime() < Date.now()) continue;
-        
         const market = parseEventToMarket(event, coin, tf);
         if (market) return market;
       }
@@ -160,25 +145,17 @@ async function fetchSearchMarket(coin: CoinId): Promise<UpDownMarket | null> {
     
     if (!Array.isArray(events)) return null;
     
-    // Find 1h market: look for hourly time range in title
     for (const event of events) {
       const title = (event.title || '').toLowerCase();
-      // Match patterns like "4am-5am", "10pm-11pm" indicating 1-hour windows
+      const slug = (event.slug || '').toLowerCase();
+      // Skip daily markets
+      if (slug.match(/on-\w+-\d+/) || title.match(/on \w+ \d+/)) continue;
+      // Match hourly patterns
       const hourlyMatch = title.match(/(\d{1,2})(am|pm)\s*-\s*(\d{1,2})(am|pm)/i);
       if (hourlyMatch) {
         const market = parseEventToMarket(event, coin, '1h');
         if (market) return market;
       }
-    }
-    
-    // Fallback: just take the first active non-daily event
-    for (const event of events) {
-      const title = (event.title || '').toLowerCase();
-      const slug = (event.slug || '').toLowerCase();
-      // Skip daily markets
-      if (slug.includes('on-march') || slug.includes('on-april') || slug.includes('on-feb') || title.includes('on march') || title.includes('on april')) continue;
-      const market = parseEventToMarket(event, coin, '1h');
-      if (market) return market;
     }
   } catch {}
   return null;
@@ -216,7 +193,6 @@ export function usePolymarketAll() {
   });
 }
 
-// Filter markets for a specific coin
 export function usePolymarketForCoin(coin: CoinId) {
   const { data, ...rest } = usePolymarketAll();
   const markets = data?.filter(m => m.coin === coin) ?? [];
@@ -239,7 +215,7 @@ export function usePolymarketPredictions() {
     .map(m => ({
       timeframe: m.timeframe === '5m' ? '5 Min' : m.timeframe === '15m' ? '15 Min' : 'Hourly',
       title: m.question,
-      targetPrice: m.priceToBeat,
+      targetPrice: 0, // Up/Down markets don't have a strike price
       yesProb: Math.round(m.upPrice * 100),
       conditionId: m.slug,
     })) ?? undefined;
