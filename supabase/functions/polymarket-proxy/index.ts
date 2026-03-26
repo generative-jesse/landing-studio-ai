@@ -2,25 +2,42 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
+
+async function fetchWithRetry(url: string, retries = 3): Promise<Response> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'PolymarketProxy/1.0' },
+      });
+      clearTimeout(timeout);
+      return res;
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      await new Promise(r => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  throw new Error('Max retries exceeded');
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response(null, { headers: corsHeaders });
   }
 
   try {
     const url = new URL(req.url);
     const path = url.searchParams.get('path') || '';
     const query = url.searchParams.get('query') || '';
-    
+
     let targetUrl: string;
     if (path) {
-      // Direct path fetch: e.g. /events/slug/btc-updown-5m-12345
       targetUrl = `https://gamma-api.polymarket.com/${path}`;
     } else if (query) {
-      // Search fetch: e.g. ?query=title=bitcoin+up+or+down&active=true
       targetUrl = `https://gamma-api.polymarket.com/events?${query}`;
     } else {
       return new Response(JSON.stringify({ error: 'Missing path or query param' }), {
@@ -29,7 +46,7 @@ serve(async (req) => {
       });
     }
 
-    const res = await fetch(targetUrl);
+    const res = await fetchWithRetry(targetUrl);
     const data = await res.text();
 
     return new Response(data, {
@@ -37,8 +54,9 @@ serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500,
+    const message = err instanceof Error ? err.message : String(err);
+    return new Response(JSON.stringify({ error: message }), {
+      status: 502,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
