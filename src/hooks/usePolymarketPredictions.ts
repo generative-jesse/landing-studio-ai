@@ -10,12 +10,17 @@ export interface UpDownMarket {
   slug: string;
   question: string;
   title: string;
-  timeRange: string; // e.g. "6:20AM-6:25AM ET"
-  upPrice: number;   // 0-1 probability
+  timeRange: string;
+  upBid: number;
+  upAsk: number;
+  downBid: number;
+  downAsk: number;
+  upPrice: number;   // midpoint or best available
   downPrice: number;
   upPayout: number;
   downPayout: number;
   endDate: string;
+  clobTokenIds: string[];
 }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -44,10 +49,11 @@ const SEARCH_TERMS: Record<CoinId, string> = {
   ripple: 'xrp up or down',
 };
 
-async function proxyFetch(params: { path?: string; query?: string }): Promise<any> {
+async function proxyFetch(params: { path?: string; query?: string; source?: string }): Promise<any> {
   const url = new URL(`${SUPABASE_URL}/functions/v1/polymarket-proxy`);
   if (params.path) url.searchParams.set('path', params.path);
   if (params.query) url.searchParams.set('query', params.query);
+  if (params.source) url.searchParams.set('source', params.source);
   
   const res = await fetch(url.toString(), {
     headers: { 'apikey': SUPABASE_KEY },
@@ -64,13 +70,22 @@ function extractTimeRange(title: string): string {
   return match ? match[1] : '';
 }
 
+function extractClobTokenIds(market: any): string[] {
+  if (!market.clobTokenIds) return [];
+  try {
+    const ids = typeof market.clobTokenIds === 'string'
+      ? JSON.parse(market.clobTokenIds)
+      : market.clobTokenIds;
+    return Array.isArray(ids) ? ids : [];
+  } catch { return []; }
+}
+
 function parseOutcomePrices(market: any): { upPrice: number; downPrice: number } {
   let upPrice = 0.5, downPrice = 0.5;
-  
   if (market.outcomePrices) {
     try {
-      const prices = typeof market.outcomePrices === 'string' 
-        ? JSON.parse(market.outcomePrices) 
+      const prices = typeof market.outcomePrices === 'string'
+        ? JSON.parse(market.outcomePrices)
         : market.outcomePrices;
       if (Array.isArray(prices) && prices.length >= 2) {
         upPrice = parseFloat(prices[0]) || 0.5;
@@ -78,8 +93,22 @@ function parseOutcomePrices(market: any): { upPrice: number; downPrice: number }
       }
     } catch {}
   }
-  
   return { upPrice, downPrice };
+}
+
+// Fetch CLOB book for a token to get real bid/ask
+async function fetchBookPrices(tokenId: string): Promise<{ bestBid: number; bestAsk: number } | null> {
+  try {
+    const book = await proxyFetch({ path: `book?token_id=${tokenId}`, source: 'clob' });
+    if (!book) return null;
+    const bids = book.bids || [];
+    const asks = book.asks || [];
+    const bestBid = bids.length > 0 ? Math.max(...bids.map((b: any) => parseFloat(b.price))) : 0;
+    const bestAsk = asks.length > 0 ? Math.min(...asks.map((a: any) => parseFloat(a.price))) : 0;
+    return { bestBid, bestAsk };
+  } catch {
+    return null;
+  }
 }
 
 function parseEventToMarket(event: any, coin: CoinId, timeframe: PolymarketTimeframe): UpDownMarket | null {
@@ -88,7 +117,8 @@ function parseEventToMarket(event: any, coin: CoinId, timeframe: PolymarketTimef
   const market = event.markets?.[0] || event;
   const { upPrice, downPrice } = parseOutcomePrices(market);
   const timeRange = extractTimeRange(title);
-  
+  const clobTokenIds = extractClobTokenIds(market);
+
   return {
     coin,
     coinSymbol: ASSET_SYMBOLS[coin],
@@ -97,12 +127,48 @@ function parseEventToMarket(event: any, coin: CoinId, timeframe: PolymarketTimef
     question: market.question || title,
     title,
     timeRange,
+    upBid: upPrice,
+    upAsk: upPrice,
+    downBid: downPrice,
+    downAsk: downPrice,
     upPrice,
     downPrice,
     upPayout: upPrice > 0 ? +(1 / upPrice).toFixed(2) : 0,
     downPayout: downPrice > 0 ? +(1 / downPrice).toFixed(2) : 0,
     endDate: event.endDate || market.end_date_iso || '',
+    clobTokenIds,
   };
+}
+
+async function enrichWithClob(market: UpDownMarket): Promise<UpDownMarket> {
+  if (market.clobTokenIds.length < 2) return market;
+  
+  try {
+    const [upBook, downBook] = await Promise.all([
+      fetchBookPrices(market.clobTokenIds[0]),
+      fetchBookPrices(market.clobTokenIds[1]),
+    ]);
+    
+    if (upBook) {
+      market.upBid = upBook.bestBid;
+      market.upAsk = upBook.bestAsk;
+      market.upPrice = upBook.bestBid > 0 && upBook.bestAsk > 0
+        ? (upBook.bestBid + upBook.bestAsk) / 2
+        : upBook.bestBid || upBook.bestAsk || market.upPrice;
+    }
+    if (downBook) {
+      market.downBid = downBook.bestBid;
+      market.downAsk = downBook.bestAsk;
+      market.downPrice = downBook.bestBid > 0 && downBook.bestAsk > 0
+        ? (downBook.bestBid + downBook.bestAsk) / 2
+        : downBook.bestBid || downBook.bestAsk || market.downPrice;
+    }
+    
+    market.upPayout = market.upPrice > 0 ? +(1 / market.upPrice).toFixed(2) : 0;
+    market.downPayout = market.downPrice > 0 ? +(1 / market.downPrice).toFixed(2) : 0;
+  } catch {}
+  
+  return market;
 }
 
 async function fetchEpochMarket(coin: CoinId, tf: '5m' | '15m'): Promise<UpDownMarket | null> {
@@ -111,14 +177,14 @@ async function fetchEpochMarket(coin: CoinId, tf: '5m' | '15m'): Promise<UpDownM
   const currentWindow = Math.floor(nowSec / interval) * interval;
   const prevWindow = currentWindow - interval;
   const nextWindow = currentWindow + interval;
-  
+
   const slugPrefix = ASSET_SLUGS[coin];
   const slugs = [
     `${slugPrefix}-updown-${tf}-${nextWindow}`,
     `${slugPrefix}-updown-${tf}-${currentWindow}`,
     `${slugPrefix}-updown-${tf}-${prevWindow}`,
   ];
-  
+
   for (const slug of slugs) {
     try {
       const event = await proxyFetch({ path: `events/slug/${slug}` });
@@ -127,11 +193,11 @@ async function fetchEpochMarket(coin: CoinId, tf: '5m' | '15m'): Promise<UpDownM
         const endDate = new Date(event.endDate || 0);
         if (endDate.getTime() < Date.now()) continue;
         const market = parseEventToMarket(event, coin, tf);
-        if (market) return market;
+        if (market) {
+          return enrichWithClob(market);
+        }
       }
-    } catch {
-      // Try next slug
-    }
+    } catch {}
   }
   return null;
 }
@@ -139,22 +205,22 @@ async function fetchEpochMarket(coin: CoinId, tf: '5m' | '15m'): Promise<UpDownM
 async function fetchSearchMarket(coin: CoinId): Promise<UpDownMarket | null> {
   const searchTerm = SEARCH_TERMS[coin];
   try {
-    const events = await proxyFetch({ 
-      query: `title=${encodeURIComponent(searchTerm)}&active=true&closed=false&limit=10` 
+    const events = await proxyFetch({
+      query: `title=${encodeURIComponent(searchTerm)}&active=true&closed=false&limit=10`
     });
-    
+
     if (!Array.isArray(events)) return null;
-    
+
     for (const event of events) {
       const title = (event.title || '').toLowerCase();
       const slug = (event.slug || '').toLowerCase();
-      // Skip daily markets
       if (slug.match(/on-\w+-\d+/) || title.match(/on \w+ \d+/)) continue;
-      // Match hourly patterns
       const hourlyMatch = title.match(/(\d{1,2})(am|pm)\s*-\s*(\d{1,2})(am|pm)/i);
       if (hourlyMatch) {
         const market = parseEventToMarket(event, coin, '1h');
-        if (market) return market;
+        if (market) {
+          return enrichWithClob(market);
+        }
       }
     }
   } catch {}
@@ -164,9 +230,9 @@ async function fetchSearchMarket(coin: CoinId): Promise<UpDownMarket | null> {
 async function fetchAllMarkets(): Promise<UpDownMarket[]> {
   const coins: CoinId[] = ['bitcoin', 'ethereum', 'solana', 'ripple'];
   const timeframes: PolymarketTimeframe[] = ['5m', '15m', '1h'];
-  
+
   const promises: Promise<UpDownMarket | null>[] = [];
-  
+
   for (const coin of coins) {
     for (const tf of timeframes) {
       if (tf === '5m' || tf === '15m') {
@@ -176,7 +242,7 @@ async function fetchAllMarkets(): Promise<UpDownMarket[]> {
       }
     }
   }
-  
+
   const results = await Promise.allSettled(promises);
   return results
     .map(r => r.status === 'fulfilled' ? r.value : null)
@@ -215,7 +281,7 @@ export function usePolymarketPredictions() {
     .map(m => ({
       timeframe: m.timeframe === '5m' ? '5 Min' : m.timeframe === '15m' ? '15 Min' : 'Hourly',
       title: m.question,
-      targetPrice: 0, // Up/Down markets don't have a strike price
+      targetPrice: 0,
       yesProb: Math.round(m.upPrice * 100),
       conditionId: m.slug,
     })) ?? undefined;
