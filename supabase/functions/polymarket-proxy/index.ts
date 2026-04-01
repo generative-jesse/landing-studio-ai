@@ -5,21 +5,27 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
+const GAMMA_BASE = 'https://gamma-api.polymarket.com';
+const CLOB_BASE = 'https://clob.polymarket.com';
+
 async function fetchWithRetry(url: string, retries = 3): Promise<Response> {
   for (let i = 0; i < retries; i++) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
+      const timeout = setTimeout(() => controller.abort(), 10000);
       const res = await fetch(url, {
         signal: controller.signal,
-        headers: { 'User-Agent': 'PolymarketProxy/1.0' },
+        headers: {
+          'User-Agent': 'PolymarketProxy/1.0',
+          'Accept': 'application/json',
+        },
       });
       clearTimeout(timeout);
-      return res;
+      if (res.ok || res.status < 500) return res;
     } catch (err) {
       if (i === retries - 1) throw err;
-      await new Promise(r => setTimeout(r, 500 * (i + 1)));
     }
+    await new Promise(r => setTimeout(r, 500 * (i + 1)));
   }
   throw new Error('Max retries exceeded');
 }
@@ -33,12 +39,15 @@ serve(async (req) => {
     const url = new URL(req.url);
     const path = url.searchParams.get('path') || '';
     const query = url.searchParams.get('query') || '';
+    const source = url.searchParams.get('source') || 'gamma'; // gamma or clob
 
     let targetUrl: string;
+    const base = source === 'clob' ? CLOB_BASE : GAMMA_BASE;
+    
     if (path) {
-      targetUrl = `https://gamma-api.polymarket.com/${path}`;
+      targetUrl = `${base}/${path}`;
     } else if (query) {
-      targetUrl = `https://gamma-api.polymarket.com/events?${query}`;
+      targetUrl = `${base}/events?${query}`;
     } else {
       return new Response(JSON.stringify({ error: 'Missing path or query param' }), {
         status: 400,
