@@ -57,10 +57,16 @@ export function matchAsset(event: any, market: any): CoinId | null {
 
 /** Classify a Gamma event into a supported timeframe using series metadata, slug and title. */
 export function classifyTimeframe(event: any, market: any): PolyTimeframe | null {
+  const allSlugs = `${event?.slug ?? ''} ${event?.seriesSlug ?? ''} ${market?.slug ?? ''}`.toLowerCase();
+  // Only binary up/down markets are supported (excludes "…-above-on-…" strike markets).
+  if (!/updown|up-or-down/.test(allSlugs)) return null;
+
   const recurrence = String(event?.series?.[0]?.recurrence ?? '').toLowerCase();
-  if (recurrence === '5m') return '5m';
-  if (recurrence === '15m') return '15m';
+  if (recurrence === '5m' || /-5m-\d+/.test(allSlugs)) return '5m';
+  if (recurrence === '15m' || /-15m-\d+/.test(allSlugs)) return '15m';
+  if (/-4h-\d+/.test(allSlugs) || /-1d-\d+/.test(allSlugs)) return null;
   if (recurrence === 'hourly' || recurrence === '1h') return '1h';
+
 
   const slug = `${event?.slug ?? ''} ${event?.seriesSlug ?? ''} ${market?.slug ?? ''}`.toLowerCase();
   if (/(^|[-\s])(updown|up-or-down)-5m([-\s]|$)/.test(slug) || /-5m-\d+/.test(slug)) return '5m';
