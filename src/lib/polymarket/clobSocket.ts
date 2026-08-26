@@ -86,23 +86,15 @@ export function applyMessage(
     for (const change of msg.price_changes ?? []) {
       const bid = parseFloat(change?.best_bid);
       const ask = parseFloat(change?.best_ask);
-      upsert(
-        String(change?.asset_id),
-        {
-          bestBid: Number.isFinite(bid) ? bid : undefined,
-          bestAsk: Number.isFinite(ask) ? ask : undefined,
-        } as Partial<TokenQuote>,
-        ts,
-      );
-      // recompute mid/spread from explicit best bid/ask
-      const tokenId = String(change?.asset_id);
-      const q = quotes.get(tokenId);
-      if (q) {
-        quotes.set(tokenId, deriveQuote(q, {}));
-      }
+      const patch: Partial<TokenQuote> = {};
+      if (Number.isFinite(bid)) patch.bestBid = bid;
+      if (Number.isFinite(ask)) patch.bestAsk = ask;
+      if (!Object.keys(patch).length) continue;
+      upsert(String(change?.asset_id), patch, ts);
     }
     return touched;
   }
+
 
   if (eventType === 'last_trade_price' || (msg?.price && msg?.asset_id && msg?.side)) {
     const price = parseFloat(msg.price);
