@@ -87,7 +87,7 @@ export function CandlestickChartPlot({
     setActive(next);
   };
 
-  const focus = active !== null ? candles[active] : candles.at(-1);
+  const focus = active !== null ? candles[active] : candles[candles.length - 1];
   const crossX = active !== null ? active * slot + slot / 2 : null;
 
   return (

@@ -16,7 +16,7 @@ export function CandlestickChartLegend({
   className,
 }: CandlestickChartLegendProps) {
   const { candles, active, formatPrice, formatVolume } = useCandlestickChart();
-  const candle = active !== null ? candles[active] : candles.at(-1);
+  const candle = active !== null ? candles[active] : candles[candles.length - 1];
   if (!candle) return null;
   const change = candle.open
     ? ((candle.close - candle.open) / candle.open) * 100

@@ -619,7 +619,7 @@ export function TabsTrigger({
         <span
           data-tabs-label=""
           aria-hidden="true"
-          inert
+          {...({ inert: "" } as Record<string,string>)}
           className="pointer-events-none absolute inset-0 inline-flex items-center justify-center text-primary-foreground [gap:inherit] [padding:inherit]"
           style={{ clipPath: initialClip }}
         >
