@@ -11,6 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@floating-ui/dom": "^1.8.0",
     "@geist-ui/core": "^2.3.8",
     "@hookform/resolvers": "^3.9.0",
     "@lottiefiles/dotlottie-react": "^0.10.0",
@@ -52,6 +53,7 @@
     "framer-motion": "^11.11.17",
     "input-otp": "^1.2.4",
     "lucide-react": "^0.451.0",
+    "motion": "^14.6.0",
     "next-themes": "^0.3.0",
     "react": "^18.3.1",
     "react-day-picker": "^8.10.1",

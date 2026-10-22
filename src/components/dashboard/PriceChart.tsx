@@ -1,20 +1,15 @@
-import { useState, useMemo, useEffect, useRef } from "react";
-import { motion } from "framer-motion";
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  ReferenceLine,
-} from "recharts";
-import { COINS, CoinId, Timeframe, calculatePriceTargets, formatPrice, ChartPoint } from "@/lib/crypto-api";
+import { useState, useMemo, useEffect } from "react";
+import { COINS, CoinId, Timeframe, formatPrice } from "@/lib/crypto-api";
 import { usePriceHistory } from "@/hooks/useCryptoData";
-import { useRealtimePrice, RealtimeTick } from "@/hooks/useRealtimePrice";
+import { RealtimeTick } from "@/hooks/useRealtimePrice";
 import { cn } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
+import {
+  type Candle,
+  CandlestickChart,
+  CandlestickChartLegend,
+  CandlestickChartPlot,
+} from "@/components/charts/candlestick-chart";
 
 interface PriceChartProps {
   coinId: CoinId;
@@ -24,97 +19,74 @@ interface PriceChartProps {
 }
 
 const TIMEFRAMES: { value: Timeframe; label: string }[] = [
-  { value: '5m', label: '5M' },
-  { value: '15m', label: '15M' },
-  { value: '1h', label: '1H' },
+  { value: "5m", label: "5M" },
+  { value: "15m", label: "15M" },
+  { value: "1h", label: "1H" },
 ];
 
-const WS_PRODUCT_MAP: Record<CoinId, string> = {
-  bitcoin: 'BTC-USD',
-  ethereum: 'ETH-USD',
-  solana: 'SOL-USD',
-  ripple: 'XRP-USD',
+/** Candle width per timeframe, in ms. */
+const BUCKET_MS: Record<Timeframe, number> = {
+  "5m": 15_000,
+  "15m": 60_000,
+  "1h": 5 * 60_000,
 };
 
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="bg-secondary/90 backdrop-blur-sm border border-border/50 rounded-lg px-3 py-2 shadow-xl">
-      <p className="text-[10px] text-muted-foreground">{label}</p>
-      <p className="text-sm font-semibold text-foreground">{formatPrice(payload[0].value)}</p>
-    </div>
-  );
-};
+const label = (ts: number) =>
+  new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+/** Fold real price samples into OHLC candles by time bucket. Volume = sample count (activity). */
+function toCandles(points: { timestamp: number; price: number }[], bucket: number): Candle[] {
+  const map = new Map<number, Candle>();
+  for (const p of points) {
+    const start = Math.floor(p.timestamp / bucket) * bucket;
+    const c = map.get(start);
+    if (!c) {
+      map.set(start, { id: String(start), label: label(start), open: p.price, high: p.price, low: p.price, close: p.price, volume: 1 });
+    } else {
+      c.high = Math.max(c.high, p.price);
+      c.low = Math.min(c.low, p.price);
+      c.close = p.price;
+      c.volume += 1;
+    }
+  }
+  return [...map.values()].sort((a, b) => Number(a.id) - Number(b.id));
+}
 
 const PriceChart = ({ coinId, timeframe, onTimeframeChange, realtimeTick }: PriceChartProps) => {
   const { data: historicalData, isLoading, isError } = usePriceHistory(coinId, timeframe);
   const coin = COINS[coinId];
-  const [livePoints, setLivePoints] = useState<ChartPoint[]>([]);
-  const lastTickRef = useRef<number>(0);
+  const [ticks, setTicks] = useState<{ timestamp: number; price: number }[]>([]);
 
-  // Reset live points when coin or timeframe changes
+  useEffect(() => setTicks([]), [coinId, timeframe]);
+
   useEffect(() => {
-    setLivePoints([]);
-  }, [coinId, timeframe]);
-
-  // Append real-time ticks to chart data (throttled to ~1s)
-  useEffect(() => {
-    if (!realtimeTick || coinId !== 'bitcoin') return;
-    const now = Date.now();
-    if (now - lastTickRef.current < 1000) return;
-    lastTickRef.current = now;
-
-    const point: ChartPoint = {
-      time: new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      timestamp: now,
-      price: realtimeTick.price,
-    };
-
-    setLivePoints(prev => {
-      const updated = [...prev, point];
-      // Keep last 60 live points max
-      return updated.slice(-60);
-    });
+    if (!realtimeTick || coinId !== "bitcoin") return;
+    setTicks((prev) => [...prev, { timestamp: Date.now(), price: realtimeTick.price }].slice(-3000));
   }, [realtimeTick, coinId]);
 
-  const chartData = useMemo(() => {
-    if (!historicalData?.length) return livePoints;
-    // Merge historical + live, trimming historical tail if we have live data
-    if (livePoints.length === 0) return historicalData;
-    // Show last portion of historical + all live
-    const maxHistorical = Math.max(0, historicalData.length - livePoints.length);
-    return [...historicalData.slice(0, maxHistorical), ...livePoints];
-  }, [historicalData, livePoints]);
+  const candles = useMemo(() => {
+    const hist = historicalData ?? [];
+    const lastHist = hist.length ? hist[hist.length - 1].timestamp : 0;
+    const merged = [...hist, ...ticks.filter((t) => t.timestamp > lastHist)];
+    if (merged.length < 2) return toCandles(merged, BUCKET_MS[timeframe]);
+    // Bucket size adapts so history sampled sparsely still forms ~48 real OHLC candles.
+    // Derived from history only and rounded to a whole minute, so candle ids stay stable as ticks stream in.
+    const span = hist.length > 1 ? hist[hist.length - 1].timestamp - hist[0].timestamp : 0;
+    const bucket = Math.max(BUCKET_MS[timeframe], Math.ceil(span / 48 / 60_000) * 60_000);
+    return toCandles(merged, bucket).slice(-60);
+  }, [historicalData, ticks, timeframe]);
 
-  const targets = useMemo(() => {
-    if (!chartData?.length) return null;
-    return calculatePriceTargets(chartData);
-  }, [chartData]);
-
-  const yDomain = useMemo(() => {
-    if (!chartData?.length) return ['auto', 'auto'] as [string, string];
-    const prices = chartData.map(d => d.price);
-    const min = Math.min(...prices);
-    const max = Math.max(...prices);
-    const padding = (max - min) * 0.08;
-    return [min - padding, max + padding];
-  }, [chartData]);
-
-  const currentPrice = useMemo(() => {
-    if (realtimeTick && coinId === 'bitcoin') return realtimeTick.price;
-    if (chartData.length > 0) return chartData[chartData.length - 1].price;
-    return null;
-  }, [realtimeTick, chartData, coinId]);
+  const currentPrice =
+    realtimeTick && coinId === "bitcoin" ? realtimeTick.price : candles[candles.length - 1]?.close ?? null;
 
   return (
     <div className="flex flex-col gap-2">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: coin.color }} />
           <h2 className="text-sm font-semibold text-foreground">{coin.symbol}/USD</h2>
-          {currentPrice && (
-            <span className="text-sm font-mono font-bold text-foreground">{formatPrice(currentPrice)}</span>
+          {currentPrice != null && (
+            <span className="text-sm font-mono font-bold text-foreground tabular-nums">{formatPrice(currentPrice)}</span>
           )}
         </div>
         <div className="flex items-center gap-0.5 bg-secondary/50 rounded-lg p-0.5">
@@ -123,10 +95,8 @@ const PriceChart = ({ coinId, timeframe, onTimeframeChange, realtimeTick }: Pric
               key={tf.value}
               onClick={() => onTimeframeChange(tf.value)}
               className={cn(
-                "px-2.5 py-1 rounded-md text-[10px] font-medium transition-all duration-200",
-                timeframe === tf.value
-                  ? "bg-primary/20 text-primary"
-                  : "text-muted-foreground hover:text-foreground"
+                "px-2.5 py-1 rounded-md text-[10px] font-medium transition-colors duration-150",
+                timeframe === tf.value ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground",
               )}
             >
               {tf.label}
@@ -135,8 +105,7 @@ const PriceChart = ({ coinId, timeframe, onTimeframeChange, realtimeTick }: Pric
         </div>
       </div>
 
-      {/* Chart */}
-      <div className="relative h-[280px] w-full">
+      <div className="relative min-h-[320px] w-full">
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center z-10">
             <Loader2 className="w-5 h-5 animate-spin text-primary" />
@@ -147,72 +116,17 @@ const PriceChart = ({ coinId, timeframe, onTimeframeChange, realtimeTick }: Pric
             <p className="text-xs text-destructive">Failed to load chart data. Retrying...</p>
           </div>
         )}
-        {chartData.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.3 }}
-            className="h-full w-full"
+        {candles.length > 0 && (
+          <CandlestickChart
+            candles={candles}
+            lastPrice={currentPrice ?? undefined}
+            label={`${coin.symbol} / USD live candles`}
+            formatPrice={(v) => formatPrice(v)}
+            formatVolume={(v) => `${v} ticks`}
           >
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 5, right: 8, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id={`gradient-${coinId}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={coin.color} stopOpacity={0.2} />
-                    <stop offset="100%" stopColor={coin.color} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border) / 0.15)" vertical={false} />
-                <XAxis
-                  dataKey="time"
-                  tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 9 }}
-                  axisLine={false}
-                  tickLine={false}
-                  interval="preserveStartEnd"
-                  minTickGap={50}
-                />
-                <YAxis
-                  orientation="right"
-                  domain={yDomain}
-                  tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 9 }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={(v) => formatPrice(v)}
-                  width={75}
-                />
-                <Tooltip content={<CustomTooltip />} />
-
-                {targets && (
-                  <>
-                    <ReferenceLine y={targets.resistance} stroke="hsl(var(--destructive))" strokeDasharray="6 4" strokeOpacity={0.4} />
-                    <ReferenceLine y={targets.support} stroke="hsl(var(--primary))" strokeDasharray="6 4" strokeOpacity={0.4} />
-                  </>
-                )}
-
-                {/* Current price line */}
-                {currentPrice && (
-                  <ReferenceLine
-                    y={currentPrice}
-                    stroke={coin.color}
-                    strokeDasharray="2 2"
-                    strokeOpacity={0.8}
-                  />
-                )}
-
-                <Area
-                  type="monotone"
-                  dataKey="price"
-                  stroke={coin.color}
-                  strokeWidth={1.5}
-                  fill={`url(#gradient-${coinId})`}
-                  animationDuration={300}
-                  isAnimationActive={livePoints.length === 0}
-                  dot={false}
-                  activeDot={{ r: 3, fill: coin.color, stroke: 'hsl(var(--background))', strokeWidth: 2 }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </motion.div>
+            <CandlestickChartLegend />
+            <CandlestickChartPlot height={300} className="mt-2" />
+          </CandlestickChart>
         )}
       </div>
     </div>

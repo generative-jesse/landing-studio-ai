@@ -65,7 +65,7 @@ const Dashboard = () => {
         </motion.div>
 
         {/* Chart (left) + Polymarket prices (right) */}
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_200px] gap-3">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-3">
           {/* Chart */}
           <motion.div
             initial={{ opacity: 0, y: 6 }}
