@@ -68,7 +68,11 @@ const PriceChart = ({ coinId, timeframe, onTimeframeChange, realtimeTick }: Pric
     const hist = historicalData ?? [];
     const lastHist = hist.length ? hist[hist.length - 1].timestamp : 0;
     const merged = [...hist, ...ticks.filter((t) => t.timestamp > lastHist)];
-    return toCandles(merged, BUCKET_MS[timeframe]).slice(-60);
+    if (merged.length < 2) return toCandles(merged, BUCKET_MS[timeframe]);
+    // Bucket size adapts so history sampled sparsely still forms ~48 real OHLC candles.
+    const span = merged[merged.length - 1].timestamp - merged[0].timestamp;
+    const bucket = Math.max(BUCKET_MS[timeframe], Math.ceil(span / 48));
+    return toCandles(merged, bucket).slice(-60);
   }, [historicalData, ticks, timeframe]);
 
   const currentPrice =
