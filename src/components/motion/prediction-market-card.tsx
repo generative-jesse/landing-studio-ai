@@ -18,6 +18,8 @@ export interface PredictionMarketCardOutcome {
 	icon?: ReactNode;
 	/** Optional team color for the compact probability line. */
 	color?: string;
+	/** When set, replaces the payout multiplier with this raw price readout (e.g. bid/ask). */
+	priceText?: string;
 }
 
 export interface PredictionMarketCardSelection {
@@ -145,6 +147,11 @@ export function PredictionMarketCard({
 								<span className="min-w-0 flex-1 break-words text-sm font-medium">
 									{outcome.label}
 								</span>
+								{outcome.priceText != null ? (
+									<span className="shrink-0 py-2 font-mono text-sm tabular-nums text-muted-foreground">
+										{outcome.priceText}
+									</span>
+								) : (
 								<Tooltip
 									content="Potential payout per $1 if this outcome wins, including your stake. Before fees; based on the displayed price."
 									className="w-44 whitespace-normal text-center leading-relaxed"
@@ -159,6 +166,7 @@ export function PredictionMarketCard({
 											: "—"}
 									</button>
 								</Tooltip>
+								)}
 								<MarketOddsButton
 									positive={index % 2 === 0}
 									outcome={outcome}

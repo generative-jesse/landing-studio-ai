@@ -37,10 +37,10 @@ function MarketCard({ row, symbol }: { row: LiveTimeframeRow; symbol: string }) 
         category="Crypto"
         status={countdown(row.msToExpiry)}
         live={fresh}
-        volume={`Up ${fmt(up?.bestBid)}/${fmt(up?.bestAsk)} · Down ${fmt(down?.bestBid)}/${fmt(down?.bestAsk)}`}
+        volume={`Up ${fmt(upMid)} · Down ${fmt(downMid)}`}
         outcomes={[
-          { id: "up", label: "Up", probability: upMid ?? 0, color: "hsl(var(--primary))" },
-          { id: "down", label: "Down", probability: downMid ?? 0, color: "hsl(var(--destructive))" },
+          { id: "up", label: "Up", probability: upMid ?? 0, color: "hsl(var(--primary))", priceText: `${fmt(up?.bestBid)} / ${fmt(up?.bestAsk)}` },
+          { id: "down", label: "Down", probability: downMid ?? 0, color: "hsl(var(--destructive))", priceText: `${fmt(down?.bestBid)} / ${fmt(down?.bestAsk)}` },
         ]}
         onOutcomeClick={() => window.open(url, "_blank", "noopener,noreferrer")}
       />
